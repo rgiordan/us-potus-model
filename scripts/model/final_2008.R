@@ -25,6 +25,9 @@ n_refresh <- n_sampling*0.1
   library(ggrepel, quietly = TRUE)
 }
 
+setwd("/home/rgiordan/Documents/git_repos/us-potus-model")
+rstan_options(auto_write = TRUE)
+
 ## Functions
 cov_matrix <- function(n, sigma2, rho){
   m <- matrix(nrow = n, ncol = n)
@@ -551,28 +554,28 @@ message("Running model...")
 #("scripts/model/poll_model_2020_no_mode_adjustment.stan")
 #("scripts/model/poll_model_2020.stan")
 
-# if rstan, uncomment these lines:
-# model <- rstan::stan_model("scripts/model/poll_model_2020.stan")
-# out <- rstan::sampling(model, data = data,
-#                        refresh = n_refresh,
-#                        chains  = n_chains, iter = 500, warmup = 250
+#if rstan, uncomment these lines:
+#model <- rstan::stan_model("scripts/model/poll_model_2020.stan")
+model <- rstan::stan_model("scripts/model/poll_model_2020_no_mode_adjustment.stan")
+out <- rstan::sampling(model, data = data,
+                       refresh = n_refresh,
+                       chains  = n_chains, iter = 500, warmup = 250)
+
+# # else if cmdstan, uncomment these
+# model <- cmdstanr::cmdstan_model("scripts/model/poll_model_2020_no_mode_adjustment.stan",compile=TRUE,force=TRUE)
+# fit <- model$sample(
+#   data = data,
+#   seed = 1843,
+#   parallel_chains = n_cores,
+#   chains = n_chains,
+#   iter_warmup = n_warmup,
+#   iter_sampling = n_sampling,
+#   refresh = n_refresh
 # )
 
-# else if cmdstan, uncomment these
-model <- cmdstanr::cmdstan_model("scripts/model/poll_model_2020_no_mode_adjustment.stan",compile=TRUE,force=TRUE)
-fit <- model$sample(
-  data = data,
-  seed = 1843,
-  parallel_chains = n_cores,
-  chains = n_chains,
-  iter_warmup = n_warmup,
-  iter_sampling = n_sampling,
-  refresh = n_refresh
-)
-
-out <- rstan::read_stan_csv(fit$output_files())
-rm(fit)
-gc()
+#out <- rstan::read_stan_csv(fit$output_files())
+#rm(fit)
+#gc()
 
 # save model for today
 write_rds(out, sprintf('models/backtest_2008/stan_model_%s.rds',RUN_DATE),compress = 'gz')
@@ -934,3 +937,10 @@ tibble(outlet='economist (backtest)',
        unwtd_brier = mean(compare$diff),
        states_correct=sum(round(compare$obama_win) == round(compare$obama_win_actual)))
 
+
+
+###########################
+# IJ stuff
+
+logit_pi_democrat_state <- rstan::extract(out, pars="logit_pi_democrat_state")
+logit_pi_democrat_national <- rstan::extract(out, pars="logit_pi_democrat_national")

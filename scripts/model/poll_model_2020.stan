@@ -25,7 +25,7 @@ data{
   // cov_matrix[S] ss_cov_mu_b_T;
   // cov_matrix[S] ss_cov_poll_bias;
   //*** prior input
-  vector[S] mu_b_prior; 
+  vector[S] mu_b_prior;
   vector[S] state_weights;
   real sigma_c;
   real sigma_m;
@@ -55,7 +55,7 @@ transformed data {
 }
 parameters {
   vector[S] raw_mu_b_T;
-  matrix[S, T] raw_mu_b; 
+  matrix[S, T] raw_mu_b;
   vector[P] raw_mu_c;
   vector[M] raw_mu_m;
   vector[Pop] raw_mu_pop;
@@ -64,7 +64,7 @@ parameters {
   vector[T] raw_e_bias;
   vector[N_national_polls] raw_measure_noise_national;
   vector[N_state_polls] raw_measure_noise_state;
-  vector[S] raw_polling_bias; 
+  vector[S] raw_polling_bias;
   real mu_b_T_model_estimation_error;
 }
 transformed parameters {
@@ -82,7 +82,7 @@ transformed parameters {
   vector[N_state_polls] logit_pi_democrat_state;
   vector[N_national_polls] logit_pi_democrat_national;
   //*** construct parameters
-  mu_b[:,T] = cholesky_ss_cov_mu_b_T * raw_mu_b_T + mu_b_prior;  // * mu_b_T_model_estimation_error 
+  mu_b[:,T] = cholesky_ss_cov_mu_b_T * raw_mu_b_T + mu_b_prior;  // * mu_b_T_model_estimation_error
   for (i in 1:(T-1)) mu_b[:, T - i] = cholesky_ss_cov_mu_b_walk * raw_mu_b[:, T - i] + mu_b[:, T + 1 - i];
   national_mu_b_average = transpose(mu_b) * state_weights;
   mu_c = raw_mu_c * sigma_c;
@@ -93,23 +93,23 @@ transformed parameters {
   for (t in 2:T) e_bias[t] = mu_e_bias + rho_e_bias * (e_bias[t - 1] - mu_e_bias) + raw_e_bias[t] * sigma_rho;
   //*** fill pi_democrat
   for (i in 1:N_state_polls){
-    logit_pi_democrat_state[i] = 
-      mu_b[state[i], day_state[i]] + 
-      mu_c[poll_state[i]] + 
-      mu_m[poll_mode_state[i]] + 
-      mu_pop[poll_pop_state[i]] + 
+    logit_pi_democrat_state[i] =
+      mu_b[state[i], day_state[i]] +
+      mu_c[poll_state[i]] +
+      mu_m[poll_mode_state[i]] +
+      mu_pop[poll_pop_state[i]] +
       unadjusted_state[i] * e_bias[day_state[i]] +
-      raw_measure_noise_state[i] * sigma_measure_noise_state + 
+      raw_measure_noise_state[i] * sigma_measure_noise_state +
       polling_bias[state[i]];
   }
-  logit_pi_democrat_national = 
-    national_mu_b_average[day_national] +  
-    mu_c[poll_national] + 
-    mu_m[poll_mode_national] + 
-    mu_pop[poll_pop_national] + 
+  logit_pi_democrat_national =
+    national_mu_b_average[day_national] +
+    mu_c[poll_national] +
+    mu_m[poll_mode_national] +
+    mu_pop[poll_pop_national] +
     unadjusted_national .* e_bias[day_national] +
     raw_measure_noise_national * sigma_measure_noise_national +
-    national_polling_bias_average;  
+    national_polling_bias_average;
 }
 
 model {
@@ -138,4 +138,3 @@ generated quantities {
     predicted_score[1:T, s] = inv_logit(to_vector(mu_b[s, 1:T]));
   }
 }
-
