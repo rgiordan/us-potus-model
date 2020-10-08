@@ -51,11 +51,13 @@ print(opt)
 print("===================")
 
 base_dir <- opt$base_dir
+model_dir <- file.path(base_dir, "example-models/us-potus-model")
 
 if (is.null(opt$save_filename)) {
+    # TODO: make this an option?
     run_year <- 2016
     save_filename <- file.path(
-        base_dir, "output",
+        model_dir,
         sprintf("election_%d_bootstrap_mcmc.Rdata", run_year))
 } else {
     save_filename <- opt$save_filename
@@ -74,7 +76,6 @@ set.seed(opt$seed)
 registerDoParallel(cores=opt$num_cores)
 options(mc.cores=1) # don't do parallel within parallel
 
-model_dir <- file.path(base_dir, "example-models/us-potus-model")
 #setwd("/home/rgiordan/Documents/git_repos/us-potus-model")
 
 ## Setup
