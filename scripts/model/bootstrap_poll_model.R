@@ -65,18 +65,49 @@ num_dates <- dim(predicted_score)[2]
 pred_dates <- 1:num_dates + ymd(start_date)
 election_row <- pred_dates == election_day
 
-predicted_score_election <- predicted_score[,election_row,,drop=TRUE]
-state_weights_array <- array(state_weights, c(1, length(state_weights)))
+GetDrawsToSave <- function(out) { 
+    predicted_score <- rstan::extract(out, pars = "predicted_score")[[1]]
+    
+    predicted_score_election <- predicted_score[, election_row, , drop=TRUE]
+    state_weights_array <- array(state_weights, c(1, length(state_weights)))
+    
+    # Sweep is just doing a broadcast.
+    predicted_nation_score_election <-
+        sweep(predicted_score_election, MARGIN=2, FUN="*", state_weights) %>%
+        apply(FUN=sum, MARGIN=1)
+    
+    pct_clinton_natl <-
+        tibble(natl_vote=predicted_nation_score_election,
+               draw=1:length(predicted_nation_score_election),
+               t=ymd(start_date))
+    
+    pct_clinton_state <-
+        as_tibble(predicted_score_election) %>%
+        mutate(draw=1:n()) %>%
+        pivot_longer(cols=-draw) %>%
+        mutate(state_num=as.numeric(str_replace(name, "^V", "")),
+               state=colnames(state_correlation_polling)[state_num]) %>%
+        select(-name)
+    
+    return(list(pct_clinton_state=pct_clinton_state,
+                pct_clinton_natl=pct_clinton_natl))
+}
 
-# Oh R you are not easy to read
-predicted_nation_score_election <-
-    sweep(predicted_score_election, MARGIN=2, FUN="*", state_weights) %>%
-    apply(FUN=sum, MARGIN=1)
 
-pct_clinton_natl <-
-    tibble(natl_vote=predicted_nation_score_election,
-           draw=1:length(predicted_nation_score_election),
-           t=ymd(start_date))
+orig_draws <- GetDrawsToSave(out)
+# 
+# predicted_score_election <- predicted_score[,election_row,,drop=TRUE]
+# state_weights_array <- array(state_weights, c(1, length(state_weights)))
+# 
+# # Oh R you are not easy to read
+# predicted_nation_score_election <-
+#     sweep(predicted_score_election, MARGIN=2, FUN="*", state_weights) %>%
+#     apply(FUN=sum, MARGIN=1)
+# 
+# pct_clinton_natl <-
+#     tibble(natl_vote=predicted_nation_score_election,
+#            draw=1:length(predicted_nation_score_election),
+#            t=ymd(start_date))
 
 # save(pct_clinton_natl, file="/tmp/pct_clinton.Rdata")
 # 15k, great
@@ -88,9 +119,14 @@ library(doParallel)
 registerDoParallel(cores=6)
 options(mc.cores=1)
 
-num_boots <- 60
+# Let's just make sure this works, then do it on the cluster.
+num_boots <- 2
+n_chains <- 2
 
+# This is too slow.
 
+# minutes * chains * boots = 50 hours
+10 * 6 * 50 / 60
 # Run the bootstraps
 boot_results <- foreach(b=1:num_boots) %dopar% {
     options(mc.cores=1) # Don't do parallel within parallel
@@ -119,29 +155,16 @@ boot_results <- foreach(b=1:num_boots) %dopar% {
     )
     sampling_time <- Sys.time() - sampling_time
     
-    # Why only save one chain?
-    predicted_score_boot <- rstan::extract(out_boot, pars = "predicted_score")[[1]]
-
-    predicted_score_election <- predicted_score_boot[,election_row,,drop=TRUE]
-    state_weights_array <- array(state_weights, c(1, length(state_weights)))
+    result_list <- GetDrawsToSave(out_boot)
+    result_list$sampling_time <- sampling_time
+    result_list$n_democrat_state <- data_boot$n_democrat_state
+    result_list$n_democrat_national <- data_boot$n_democrat_national
     
-    # Oh R you are not easy to read
-    predicted_nation_score_election <-
-        sweep(predicted_score_election, MARGIN=2, FUN="*", state_weights) %>%
-        apply(FUN=sum, MARGIN=1)
-    
-    pct_clinton_natl <-
-        tibble(natl_vote=predicted_nation_score_election,
-               draw=1:length(predicted_nation_score_election),
-               t=ymd(start_date))
-    
-    list(pct_clinton_natl=pct_clinton_natl,
-         sampling_time=sampling_time)
+    return(result_list)
 }
 
 
-
-
+#save()
 
 
 
