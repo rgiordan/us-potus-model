@@ -1,6 +1,7 @@
-
-## Desc
-# Refactored version run file
+#!/usr/bin/env Rscript
+#
+# Example usage:
+# $ ....
 
 library(tidyverse, quietly = TRUE)
 library(rstan, quietly = TRUE)
@@ -8,65 +9,100 @@ library(stringr, quietly = TRUE)
 library(lubridate, quietly = TRUE)
 library(pbapply, quietly = TRUE)
 library(parallel, quietly = TRUE)
-# library(boot, quietly = TRUE)
-# library(lqmm, quietly = TRUE)
-library(gridExtra, quietly = TRUE)
-# library(ggrepel, quietly = TRUE)
+library(optparse, quietly = TRUE)
+library(doParallel)
 
-setwd("/home/rgiordan/Documents/git_repos/us-potus-model")
 rstan_options(auto_write = TRUE)
 
-# This fixes the random walks.
-set.seed(42)
+
+option_list <- list(
+    make_option(c("--base_dir"),
+                default="/home/rgiordan/Documents/git_repos/InfinitesimalJackknifeWorkbench/src/bayes",
+                help="The base directory"),
+    make_option(c("--save_filename"),
+                help="Optional filename and path relative to base_dir for the output"),
+    make_option(c("--force"),
+                action="store_true",
+                default=FALSE,
+                help="If set, overwrite existing results"),
+    make_option(c("--num_cores"),
+                default=1,
+                help="Number of cores for parallel processing"),
+    make_option(c("--num_mcmc_samples"),
+                default=500,
+                help="Default number of MCMC samples"),
+    make_option(c("--num_boots"),
+                default=50,
+                help="Default number of bootstrap samples"),
+    make_option(c("--num_mcmc_chains"),
+                default=6,
+                help="Number of MCMC chains"),
+    make_option(c("--seed"),
+                default=42,
+                help="Random seed")
+)
+
+# get command line options, if help option encountered print help and exit,
+# otherwise if options not found on command line then set defaults,
+opt <- parse_args(OptionParser(option_list=option_list))
+print("===================")
+print("Options:")
+print(opt)
+print("===================")
+
+base_dir <- opt$base_dir
+
+if (is.null(opt$save_filename)) {
+    run_year <- 2016
+    save_filename <- file.path(
+        base_dir, "output",
+        sprintf("election_%d_bootstrap_mcmc.Rdata", run_year))
+} else {
+    save_filename <- opt$save_filename
+}
+
+if (file.exists(save_filename)) {
+    if (opt$force) {
+        cat("Overwriting\n", save_filename, "\n", sep="")
+    } else {
+        cat("File\n", save_filename, "\n", "already exists, terminating.", sep="")
+        quit()
+    }
+}
+
+set.seed(opt$seed)
+registerDoParallel(cores=opt$num_cores)
+options(mc.cores=1) # don't do parallel within parallel
+
+model_dir <- file.path(base_dir, "example-models/us-potus-model")
+#setwd("/home/rgiordan/Documents/git_repos/us-potus-model")
 
 ## Setup
 #rm(list = ls())
-options(mc.cores = 6)
-n_chains <- 6
-n_cores <- 6
-n_sampling <- 500
-n_warmup <- 500
-n_refresh <- n_sampling*0.1
+# options(mc.cores = opt$num_cores)
+# n_chains <- 6
+# n_cores <- 6
+# n_sampling <- 500
+# n_warmup <- 500
+# n_refresh <- n_sampling*0.1
 
-
-## Master variables
-RUN_DATE <- ymd("2016-11-08")
-
-# election_day <- ymd("2016-11-08")
-# start_date <- as.Date("2016-03-01") # Keeping all polls after March 1, 2016
 
 ####################
 
-load(file=sprintf('models/stan_data_%s.Rdata', RUN_DATE))
+run_date <- ymd("2016-11-08")
 
-model <- rstan::stan_model("scripts/model/poll_model_2020.stan")
-
-run_init <- FALSE
-
-if (run_init) {
-    sampling_time <- Sys.time()
-    out <- rstan::sampling(model, data = data,
-                           refresh = n_refresh,
-                           chains  = n_chains,
-                           iter = 500,
-                           warmup = 250
-    )
-    sampling_time <- Sys.time() - sampling_time
-    print(sampling_time)
-} else {
-    out <- read_rds(sprintf('models/stan_model_%s.rds',RUN_DATE))
-    predicted_score <- rstan::extract(out, pars = "predicted_score")[[1]]
-    rm(out)
-}
+data_filename <- file.path(model_dir, sprintf("/stan_data_%s.Rdata", run_date))
+load(file=data_filename)
+model <- rstan::stan_model(file.path(model_dir, "poll_model_2020.stan"))
 
 ###################
 
-num_dates <- dim(predicted_score)[2]
-pred_dates <- 1:num_dates + ymd(start_date)
-election_row <- pred_dates == election_day
-
 GetDrawsToSave <- function(out) { 
     predicted_score <- rstan::extract(out, pars = "predicted_score")[[1]]
+
+    num_dates <- dim(predicted_score)[2]
+    pred_dates <- 1:num_dates + ymd(start_date)
+    election_row <- pred_dates == election_day
     
     predicted_score_election <- predicted_score[, election_row, , drop=TRUE]
     state_weights_array <- array(state_weights, c(1, length(state_weights)))
@@ -94,40 +130,9 @@ GetDrawsToSave <- function(out) {
 }
 
 
-orig_draws <- GetDrawsToSave(out)
-# 
-# predicted_score_election <- predicted_score[,election_row,,drop=TRUE]
-# state_weights_array <- array(state_weights, c(1, length(state_weights)))
-# 
-# # Oh R you are not easy to read
-# predicted_nation_score_election <-
-#     sweep(predicted_score_election, MARGIN=2, FUN="*", state_weights) %>%
-#     apply(FUN=sum, MARGIN=1)
-# 
-# pct_clinton_natl <-
-#     tibble(natl_vote=predicted_nation_score_election,
-#            draw=1:length(predicted_nation_score_election),
-#            t=ymd(start_date))
-
-# save(pct_clinton_natl, file="/tmp/pct_clinton.Rdata")
-# 15k, great
-
 ####################
-# How to bootstrap?
-
-library(doParallel)
-registerDoParallel(cores=6)
-options(mc.cores=1)
-
-# Let's just make sure this works, then do it on the cluster.
-num_boots <- 2
-n_chains <- 2
-
-# This is too slow.
-
-# minutes * chains * boots = 50 hours
-10 * 6 * 50 / 60
 # Run the bootstraps
+
 boot_results <- foreach(b=1:num_boots) %dopar% {
     options(mc.cores=1) # Don't do parallel within parallel
 
@@ -148,10 +153,9 @@ boot_results <- foreach(b=1:num_boots) %dopar% {
     sampling_time <- Sys.time()
     out_boot <- rstan::sampling(model,
                                 data = data_boot,
-                                refresh = n_refresh,
-                                chains  = n_chains,
-                                iter = 500,
-                                warmup = 250
+                                chains  = opt$num_mcmc_chains,
+                                iter = opt$num_mcmc_samples,
+                                warmup = opt$num_mcmc_samples
     )
     sampling_time <- Sys.time() - sampling_time
     
@@ -164,10 +168,10 @@ boot_results <- foreach(b=1:num_boots) %dopar% {
 }
 
 
-#save()
-
-
-
+save(boot_results,
+     run_date,
+     data_filename,
+     file=save_filename)
 
 
 
@@ -177,6 +181,23 @@ boot_results <- foreach(b=1:num_boots) %dopar% {
 # Sanity checks
 
 if (FALSE) {
+    # 
+    # predicted_score_election <- predicted_score[,election_row,,drop=TRUE]
+    # state_weights_array <- array(state_weights, c(1, length(state_weights)))
+    # 
+    # # Oh R you are not easy to read
+    # predicted_nation_score_election <-
+    #     sweep(predicted_score_election, MARGIN=2, FUN="*", state_weights) %>%
+    #     apply(FUN=sum, MARGIN=1)
+    # 
+    # pct_clinton_natl <-
+    #     tibble(natl_vote=predicted_nation_score_election,
+    #            draw=1:length(predicted_nation_score_election),
+    #            t=ymd(start_date))
+    
+    # save(pct_clinton_natl, file="/tmp/pct_clinton.Rdata")
+    # 15k, great
+    
     predicted_nation_score_election2 <-
         predicted_score_election * rep(state_weights, each=dim(predicted_score_election)[1])
     predicted_nation_score_election2 <- apply(predicted_nation_score_election2, FUN=sum, MARGIN=1)
@@ -215,4 +236,25 @@ if (FALSE) {
                   var = var(natl_vote),
                   prob = mean(natl_vote > 0.5)) %>%
         mutate(state = '--')
+    
+    #model <- rstan::stan_model("scripts/model/poll_model_2020.stan")
+    
+    # run_init <- FALSE
+    # 
+    # if (run_init) {
+    #     sampling_time <- Sys.time()
+    #     out <- rstan::sampling(model, data = data,
+    #                            refresh = n_refresh,
+    #                            chains  = n_chains,
+    #                            iter = 500,
+    #                            warmup = 250
+    #     )
+    #     sampling_time <- Sys.time() - sampling_time
+    #     print(sampling_time)
+    # } else {
+    #     out <- read_rds(sprintf('models/stan_model_%s.rds',run_date))
+    #     predicted_score <- rstan::extract(out, pars = "predicted_score")[[1]]
+    #     rm(out)
+    # }
+    
 }
